@@ -9,6 +9,9 @@ export const VELOCITY_CEILING = 0.62;
 /** Most melodic notes that may ring at once; beyond this the weakest is released. */
 export const MAX_VOICES = 8;
 
+const FALLBACK_POLYPHONY = 24;
+const FALLBACK_RELEASE = 1.6;
+
 interface InstrumentSpec {
   /** Sampled notes (true sounding pitch). Sparse: the sampler repitches between them. */
   notes: string[];
@@ -71,7 +74,9 @@ export class Instruments {
   private readonly fallbacks: Record<BusName, Tone.PolySynth<Tone.FMSynth>>;
   private readonly pad: Tone.PolySynth<Tone.Synth>;
   private readonly padFilter: Tone.Filter;
+  private readonly padBreath: Tone.LFO;
   private readonly voices: ActiveVoice[] = [];
+  private readonly fallbackBusy: Record<BusName, number[]> = { melody: [], fx: [] };
   private lastKey = -1;
   private lastTime = -1;
 
@@ -80,14 +85,13 @@ export class Instruments {
     const makeFallback = (bus: Tone.ToneAudioNode) => {
       const synth = new Tone.PolySynth({
         voice: Tone.FMSynth,
-        // Generous: fallback voices ring through their release before freeing up.
-        maxPolyphony: 24,
+        maxPolyphony: FALLBACK_POLYPHONY,
         options: {
           harmonicity: 2,
           modulationIndex: 1.1,
           oscillator: { type: 'sine' },
           modulation: { type: 'sine' },
-          envelope: { attack: 0.025, decay: 1.5, sustain: 0, release: 1.6 },
+          envelope: { attack: 0.025, decay: 1.5, sustain: 0, release: FALLBACK_RELEASE },
           modulationEnvelope: { attack: 0.01, decay: 0.35, sustain: 0, release: 0.5 },
           volume: -10,
         },
@@ -109,9 +113,16 @@ export class Instruments {
       },
     });
     this.padFilter = new Tone.Filter({ type: 'lowpass', frequency: 820, Q: 0.3, rolloff: -24 });
-    const breathe = new Tone.LFO({ frequency: 0.045, min: 620, max: 1050, type: 'sine' }).start();
-    breathe.connect(this.padFilter.frequency);
+    // Started in start(), once the context is running (starting a source on a
+    // still-suspended context makes Tone log a warning).
+    this.padBreath = new Tone.LFO({ frequency: 0.045, min: 620, max: 1050, type: 'sine' });
+    this.padBreath.connect(this.padFilter.frequency);
     this.pad.chain(this.padFilter, padBus);
+  }
+
+  /** Start free-running modulation. Call once the audio context is running. */
+  start(): void {
+    this.padBreath.start();
   }
 
   /** Begin loading samples. Safe to call once; failures leave the fallback in place. */
@@ -185,12 +196,19 @@ export class Instruments {
         release: (t) => sampler.triggerRelease(note, t),
       });
     } else {
+      // A fallback voice stays busy through its whole release, even when the
+      // voice cap lets it go early. Under a flood of input, quietly skip notes
+      // rather than run the synth out of voices.
+      const busy = this.fallbackBusy[bus];
+      for (let i = busy.length - 1; i >= 0; i--) if (busy[i] <= time) busy.splice(i, 1);
+      if (busy.length >= FALLBACK_POLYPHONY - 4) return;
       const synth = this.fallbacks[bus];
       const d = Math.min(duration, 1.6);
+      busy.push(time + d + FALLBACK_RELEASE + 0.1);
       synth.triggerAttackRelease(note, d, time, v * 0.8);
       this.voices.push({
         start: time,
-        end: time + d + 1.6,
+        end: time + d + FALLBACK_RELEASE,
         velocity: v,
         release: (t) => synth.triggerRelease(note, t),
       });

@@ -134,6 +134,7 @@ export class AudioEngine {
       return;
     }
 
+    this.instruments.start();
     this.ambience.start();
     this.music.start();
     this.ready = true;

@@ -55,6 +55,11 @@ Debug: `T` toggles a x20 fast-forward of the day cycle. In dev builds `window.__
 
 Measured in Chrome (dev meter after the master): idle about -30 dBFS RMS with peaks near -12; ambience alone about -40; a deliberately absurd stress run (a touch every 100 ms plus everything else) peaked at -2.9 dBFS with the voice cap holding at 8. Interaction notes landed within 8 ms of the 8th-note grid and every note was in key. Hide/show suspends and resumes the context. Blocking the sample files switches all four instruments to the fallback.
 
+Console is clean in Chrome through start, play and a hide/show cycle (checked 2026-11-12). Two things fixed after the milestone commit:
+
+- Tone's `The AudioContext is "suspended"...` warning fired once, just after the first tap: the pad's filter LFO was started in the `Instruments` constructor while `Tone.start()` was still resolving. It now starts in `Instruments.start()`, called once the context is running. Rule of thumb: construct nodes any time, but call `.start()` on sources, LFOs and the transport only after the `await` in `AudioEngine.start()`.
+- With samples unavailable, flooding input made the fallback `PolySynth` log `Max polyphony exceeded`. The fallback now tracks how long each voice stays busy and silently skips notes before Tone's limit is reached. The only console output left in that case is one deliberate `[celestial] ... samples unavailable` warning per instrument.
+
 ## Decisions worth knowing
 
 - **Draw order:** sky (opaque, first) -> stars -> ridges -> water -> effects. Stars, ridges and water are in the transparent queue so `renderOrder` controls this; water uses `NoBlending` and still writes depth.
@@ -68,7 +73,6 @@ Measured in Chrome (dev meter after the master): idle about -30 dBFS RMS with pe
 ## Known issues / to check on device
 
 - **Audio has only been measured, never heard.** Levels, timing and key are verified, but tone, balance and any clicks need a human listen (Mac and iPhone) and tuning in `instruments.ts` / `engine.ts` / `ambience.ts`.
-- Chrome logged Tone's warning `The AudioContext is "suspended". Invoke Tone.start()...` during testing. Not yet traced; check whether it appears before or after the first tap and remove the cause.
 - An unexplained event during this session emptied `node_modules/expect-type/dist` (vitest then fails to start). `rm -rf node_modules/expect-type && npm install` fixes it.
 
 - Not yet run on a real iPhone. MSAA on a half-float render target and the half-float bloom chain should be confirmed in iOS Safari.
