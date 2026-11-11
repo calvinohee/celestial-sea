@@ -242,6 +242,32 @@ export const WAKE = {
 /** Minimum seconds between lantern releases. */
 export const LANTERN_COOLDOWN = 1.5;
 
+export const LANTERNS = {
+  pool: 10,
+  /** Seconds from release to settling as a star (min, max). */
+  rise: [7.5, 9] as [number, number],
+  /** Metres a lantern climbs on its own while it is being drawn into the sky. */
+  climb: 7,
+  /** Seconds over which a lantern loses the boat's speed it was released with. */
+  drift: 6,
+  /** Seconds the lantern takes to dissolve once its star has appeared. */
+  fade: 0.8,
+};
+
+export const CONSTELLATIONS = {
+  /** A constellation completes after this many stars (min, max inclusive). */
+  minStars: 5,
+  maxStars: 7,
+  /** Most constellations kept; beyond this the oldest fades out. */
+  max: 30,
+  /** Angular distance between linked stars, degrees (min, max). */
+  step: [5.5, 10] as [number, number],
+  /** Seconds a removed constellation takes to fade away. */
+  fadeOut: 4,
+  /** Brightness of player stars and links in full daylight (1 at night). */
+  dayBrightness: 0.55,
+};
+
 // ---------------------------------------------------------------------------
 // Rendering quality
 // ---------------------------------------------------------------------------

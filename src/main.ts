@@ -2,7 +2,10 @@ import { Scene } from 'three';
 import { AudioEngine } from './audio/engine';
 import { prefetchSamples } from './audio/instruments';
 import { BOAT, DEBUG_TIME_SCALE, LANTERN_COOLDOWN, type QualityTier } from './config';
+import { Constellations, type Reservation } from './game/constellations';
 import { Input } from './game/input';
+import { Lanterns } from './game/lanterns';
+import { loadSky } from './game/persistence';
 import { Boat } from './render/boat';
 import { CameraRig } from './render/camera';
 import { RenderPipeline } from './render/renderer';
@@ -34,12 +37,52 @@ const water = new Water(skyUniforms, noise, ridges.profile);
 const ripples = new Ripples();
 const wake = new Wake(noise);
 const boat = new Boat();
-scene.add(sky.mesh, stars.group, ridges.group, water.mesh, wake.mesh, ripples.mesh, boat.group, boat.lights);
+const constellations = new Constellations(loadSky());
+const lanterns = new Lanterns();
+scene.add(
+  sky.mesh,
+  stars.group,
+  constellations.group,
+  ridges.group,
+  water.mesh,
+  wake.mesh,
+  ripples.mesh,
+  boat.group,
+  boat.lights,
+  lanterns.mesh,
+);
 
 const rig = new CameraRig();
 
 let elapsed = 0;
 let lastRelease = -Infinity;
+/** When to play the constellation-complete swell (just after its last star lands). */
+let fanfareAt = Infinity;
+
+/** Release a lantern from the boat. Always allowed, but never faster than the calm rate limit. */
+function releaseLantern(): boolean {
+  if (elapsed - lastRelease < LANTERN_COOLDOWN || !lanterns.hasFree) return false;
+  lastRelease = elapsed;
+  const reservation = constellations.reserve(rig.camera, stars.quaternion, elapsed);
+  lanterns.release(
+    boat.lanternPosition,
+    elapsed,
+    reservation,
+    Math.sin(boat.heading) * boat.speed,
+    -Math.cos(boat.heading) * boat.speed,
+  );
+  ripples.spawn(boat.x, boat.z, 0.3, 0.6);
+  audio.music?.lanternRelease();
+  return true;
+}
+
+/** A lantern has reached its place: it becomes a star and links to the one before. */
+function onLanternSettle(reservation: Reservation): void {
+  const result = constellations.settle(reservation, elapsed);
+  if (!result) return;
+  audio.music?.starSettle();
+  if (result.fanfare) fanfareAt = elapsed + 0.9;
+}
 
 const input = new Input(canvas, rig.camera, {
   onWaterTouch(x, z, screenX) {
@@ -47,10 +90,7 @@ const input = new Input(canvas, rig.camera, {
     audio.music?.waterTouch(screenX);
   },
   onRelease() {
-    // Calm rate limit. The lantern itself arrives in milestone 4; its sound is already here.
-    if (elapsed - lastRelease < LANTERN_COOLDOWN) return;
-    lastRelease = elapsed;
-    audio.music?.lanternRelease();
+    releaseLantern();
   },
   onKey(code) {
     // Debug: T toggles a x20 fast-forward of the day cycle.
@@ -59,10 +99,11 @@ const input = new Input(canvas, rig.camera, {
       console.info(`[celestial] time x${cycle.timeScale} (${cycle.phaseName})`);
     }
     if (import.meta.env.DEV) {
-      // Audition sounds whose triggers are not built yet.
+      // Audition sounds on demand; C clears the sky until the settings panel exists.
       if (code === 'Digit1') audio.music?.starSettle();
       if (code === 'Digit2') audio.music?.constellationComplete();
       if (code === 'Digit3') stars.triggerShootingStar(rig.camera);
+      if (code === 'KeyC') constellations.clear(elapsed);
     }
   },
 });
@@ -89,6 +130,7 @@ pipeline.onResize = (bw, bh, pixelRatio) => {
   rig.setAspect(bw / bh);
   water.setSize(bw, bh);
   stars.setPixelRatio(pixelRatio);
+  constellations.setResolution(bw, bh, pixelRatio);
 };
 pipeline.resize();
 setQuality('high');
@@ -140,6 +182,12 @@ function tick(dt: number): void {
 
   sky.update(cycle);
   stars.update(dt, elapsed, cycle, camera);
+  lanterns.update(elapsed, camera, stars.quaternion, 0.8 + 0.2 * cycle.darkness, onLanternSettle);
+  constellations.update(elapsed, cycle, camera, stars.quaternion);
+  if (elapsed >= fanfareAt) {
+    fanfareAt = Infinity;
+    audio.music?.constellationComplete();
+  }
   ridges.update(camera);
   water.update(elapsed, cycle, camera);
   water.setLamp(boat.lanternPosition, boat.lanternLight);
@@ -196,6 +244,13 @@ if (import.meta.env.DEV) {
     input,
     ripples,
     audio,
+    constellations,
+    lanterns,
+    releaseLantern,
+    /** Simulation clock in seconds. */
+    get elapsed() {
+      return elapsed;
+    },
     setQuality,
     /** Advance the simulation by `seconds` in fixed steps (browser-independent testing). */
     step(seconds: number, fps = 60) {

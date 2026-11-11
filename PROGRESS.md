@@ -8,8 +8,8 @@ Running record so a later session can pick up without re-reading everything. See
 |---|---|
 | 1. Scene | Done |
 | 2. Boat and controls | Done |
-| 3. Audio engine | Done (needs a listen, see known issues) |
-| 4. Lanterns and constellations | Not started |
+| 3. Audio engine | Done |
+| 4. Lanterns and constellations | Done |
 | 5. Polish and ship | Not started |
 
 ## How to run
@@ -44,7 +44,7 @@ Debug: `T` toggles a x20 fast-forward of the day cycle. In dev builds `window.__
 - The lantern lights the water around the boat (term in the water shader) and is mirrored by the planar reflection pass.
 - `onRelease` is rate-limited to one per 1.5 s already; the lantern itself is milestone 4.
 
-## Milestone 3: Audio engine (done, not yet auditioned by ear)
+## Milestone 3: Audio engine (done)
 
 - `src/ui/startScreen.ts`: title card over the live sky; the first tap/click/Enter calls `audio.start()` inside the gesture (iOS unlock), then input is enabled 450 ms later.
 - `src/audio/engine.ts`: context created on first tap (`latencyHint: 'playback'`). Buses: melody (+ dotted-eighth echo) and pad -> music volume; interaction sounds -> effects volume; ambience -> ambience volume. Melodic chain has a 60 Hz low-cut and -7 dB shelf above 8 kHz, dry + send to one 8 s reverb. Master: compressor -> limiter (-1 dB) -> soft ceiling -> 3 s fade in. `setVolume(kind, v)` ramps (ready for the settings panel). `navigator.audioSession.type = 'playback'`; hidden -> fade, suspend; visible -> resume, fade in; `ensureRunning()` on pointer down.
@@ -60,6 +60,18 @@ Console is clean in Chrome through start, play and a hide/show cycle (checked 20
 - Tone's `The AudioContext is "suspended"...` warning fired once, just after the first tap: the pad's filter LFO was started in the `Instruments` constructor while `Tone.start()` was still resolving. It now starts in `Instruments.start()`, called once the context is running. Rule of thumb: construct nodes any time, but call `.start()` on sources, LFOs and the transport only after the `await` in `AudioEngine.start()`.
 - With samples unavailable, flooding input made the fallback `PolySynth` log `Max polyphony exceeded`. The fallback now tracks how long each voice stays busy and silently skips notes before Tone's limit is reached. The only console output left in that case is one deliberate `[celestial] ... samples unavailable` warning per instrument.
 
+## Milestone 4: Lanterns and constellations (done)
+
+- `src/game/lanterns.ts`: pool of 10 lanterns, one instanced draw call (also on `REFLECT_LAYER`). A lantern inherits the boat's velocity, rises and sways on its own, then is drawn toward its reserved place: seen from the camera its direction eases to the star while its distance grows geometrically to 900 m, so it shrinks to a point exactly where the star will appear. Flight is 7.5 to 9 s; arrivals are forced into release order. The shader draws a small paper lantern up close and never lets it get smaller than a bright star.
+- `src/game/constellations.ts`: everything is stored in the star frame, so finished constellations turn with the sky. `reserve()` picks the star's place at release time (so several lanterns in flight chain correctly): a new constellation starts in the emptiest visible patch; later stars step 5.5 to 10 degrees on from the previous one, turning up to about 80 degrees, scored to stay in view and clear of other stars. `settle()` adds the star and its thread, completes at the constellation's target (5 to 7, chosen at random), and returns whether to play the swell. If an unfinished constellation is out of view when the next lantern is released, it is closed as it stands and a new one begins in view. Stars are one `Points` (warm, larger than background stars, settle flash, completion shimmer); threads are screen-space ribbons in one mesh.
+- Cap of 30: the oldest fades out over 4 s, then is dropped. `clear()` fades everything and empties storage at once.
+- `src/game/persistence.ts`: `localStorage` key `celestial-sea.sky.v1`, every access in try/catch, loaded data validated and re-normalised. Saved on every settle. Only settled stars are saved; an unfinished constellation resumes next session.
+- Wiring in `main.ts`: `releaseLantern()` (rate limit 1.5 s, needs a free pool slot) reserves, releases, ripples and plays the pluck; `onLanternSettle` plays the glockenspiel note and schedules the completion swell 0.9 s later.
+- Dev key `C` clears the sky until the settings panel ("Clear my sky") exists in milestone 5.
+- Tests: `tests/sky.test.ts` covers storage failure modes, 5 to 7 star constellations in landscape and portrait, in-flight chaining, the cap, resume after reload, clear, and the out-of-view case.
+
+Checked in Chrome: flight path, linking, completion (8 releases gave 8 settle notes and 1 swell), reload restores the sky and resumes the unfinished constellation, clear empties sky and storage, console clean. Draw calls on high measured at 31 with lanterns in flight and constellations on screen (budget 150).
+
 ## Decisions worth knowing
 
 - **Draw order:** sky (opaque, first) -> stars -> ridges -> water -> effects. Stars, ridges and water are in the transparent queue so `renderOrder` controls this; water uses `NoBlending` and still writes depth.
@@ -72,7 +84,8 @@ Console is clean in Chrome through start, play and a hide/show cycle (checked 20
 
 ## Known issues / to check on device
 
-- **Audio has only been measured, never heard.** Levels, timing and key are verified, but tone, balance and any clicks need a human listen (Mac and iPhone) and tuning in `instruments.ts` / `engine.ts` / `ambience.ts`.
+- Audio: the owner listened on 2026-11-12 and found it soothing. Not yet heard on an iPhone speaker, and nobody has sat through a full 20-minute loop listening for clicks.
+- Constellations are placed for the screen shape in use. One built in landscape can run off the sides when viewed in portrait (only matters if the same saved sky is opened in both orientations).
 - An unexplained event during this session emptied `node_modules/expect-type/dist` (vitest then fails to start). `rm -rf node_modules/expect-type && npm install` fixes it.
 
 - Not yet run on a real iPhone. MSAA on a half-float render target and the half-float bloom chain should be confirmed in iOS Safari.
