@@ -197,15 +197,15 @@ export const BOAT = {
   turnAcceleration: 0.55,
   /** Boat eases off inside this distance from the steering target. */
   arriveRadius: 14,
-  lanternHeight: 1.62,
+  lanternHeight: 1.36,
 };
 
 export const CAMERA = {
   /** Vertical FOV in landscape and in tall portrait. */
   fovLandscape: 50,
   fovPortrait: 74,
-  distance: 11.5,
-  height: 2.25,
+  distance: 12,
+  height: 2.0,
   /** Sideways offset so the boat sits slightly off-centre. */
   side: 1.1,
   /** Fraction of the screen height (from the bottom) where the horizon sits. */
@@ -221,9 +221,8 @@ export const INPUT = {
   /** Press shorter than this (ms) and nearly still = a tap. */
   tapMaxMs: 260,
   tapMaxMovePx: 12,
-  /** Steering target is clamped to this range from the boat, metres. */
-  targetMin: 4,
-  targetMax: 160,
+  /** Touches farther than this from the camera are pulled in to it, metres. */
+  targetMax: 180,
 };
 
 export const RIPPLES = {

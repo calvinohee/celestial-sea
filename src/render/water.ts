@@ -8,6 +8,7 @@ import {
   PerspectiveCamera,
   ShaderMaterial,
   Vector2,
+  Vector3,
   type Scene,
   type Texture,
   type WebGLRenderer,
@@ -53,6 +54,8 @@ uniform vec2 uResolution;
 uniform vec3 uWaterDeep;
 uniform float uFogDistance;
 uniform float uRipple;
+uniform vec3 uLampPos;
+uniform vec3 uLampColor;
 ${SKY_GLSL}
 
 void main() {
@@ -105,6 +108,15 @@ ${layers
   float sd64 = sd8 * sd8; sd64 *= sd64; sd64 *= sd64;
   float glitter = sd64 * sd64 * sd64 * 0.85 + sd64 * 0.09;
   col += uSunColor * (uSunDisc * glitter * (1.0 - ridgeMask) * fres);
+
+  // Warm pool of light from the boat's lantern, with a little sparkle.
+  vec3 toLamp = uLampPos - vWorld;
+  float ld2 = dot(toLamp, toLamp);
+  float latt = 1.0 / (1.0 + ld2 * 0.16);
+  latt *= latt;
+  vec3 L = toLamp * inversesqrt(ld2);
+  float lspec = pow(max(dot(reflect(-L, N), V), 0.0), 26.0);
+  col += uLampColor * (latt * (0.34 + 2.4 * lspec));
 
   // Blurred planar reflection of light sources (lanterns, bright stars, glow).
   if (uReflect > 0.0) {
@@ -205,6 +217,8 @@ export class Water {
         uWaterDeep: { value: new Color() },
         uFogDistance: { value: WATER.fogDistance },
         uRipple: { value: WATER.rippleStrength },
+        uLampPos: { value: new Vector3(0, 1.6, 0) },
+        uLampColor: { value: new Color(0, 0, 0) },
       },
       // Drawn in the transparent queue purely for ordering (after the ridges);
       // it still overwrites and writes depth like an opaque surface.
@@ -226,6 +240,7 @@ export class Water {
     this.blurQuad = new FullScreenQuad(this.blurMaterial);
 
     this.mirrorCamera.matrixAutoUpdate = false;
+    this.mirrorCamera.matrixWorldAutoUpdate = false;
     this.mirrorCamera.layers.set(REFLECT_LAYER);
   }
 
@@ -248,6 +263,12 @@ export class Water {
     this.material.uniforms.uReflect.value = this.reflections ? 1 : 0;
   }
 
+  /** The boat's lantern lights the water around it. */
+  setLamp(position: Vector3, color: Color): void {
+    this.material.uniforms.uLampPos.value.copy(position);
+    this.material.uniforms.uLampColor.value.copy(color);
+  }
+
   /**
    * Render everything on REFLECT_LAYER mirrored about the water plane, at half
    * resolution, then blur it (wider vertically, like real light on water).
@@ -258,9 +279,11 @@ export class Water {
 
     // View = mainView * mirror, so the reflected scene lands exactly where the
     // main camera sees the water: the water shader samples it by screen UV.
+    // three.js strips scale (and therefore a mirror) out of camera view
+    // matrices when it updates them, so both matrices are written directly.
     const mc = this.mirrorCamera;
-    mc.matrix.multiplyMatrices(this.mirror, camera.matrixWorld);
-    mc.matrixWorldNeedsUpdate = true;
+    mc.matrixWorld.multiplyMatrices(this.mirror, camera.matrixWorld);
+    mc.matrixWorldInverse.multiplyMatrices(camera.matrixWorldInverse, this.mirror);
     mc.projectionMatrix.copy(camera.projectionMatrix);
     mc.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
 
