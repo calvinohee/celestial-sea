@@ -10,7 +10,7 @@ Running record so a later session can pick up without re-reading everything. See
 | 2. Boat and controls | Done |
 | 3. Audio engine | Done |
 | 4. Lanterns and constellations | Done |
-| 5. Polish and ship | Not started |
+| 5. Polish and ship | Done (not yet deployed; needs device testing) |
 
 ## How to run
 
@@ -19,7 +19,12 @@ npm install
 npm run dev        # dev server
 npm run build      # typecheck + production build to dist/
 npm test           # unit tests (vitest)
+npm run icons      # redraw public/icons/*.png (procedural, no dependencies)
 ```
+
+## Deploying
+
+`.github/workflows/deploy.yml` builds, tests and publishes `dist/` to GitHub Pages on every push to `main`. It has never run: this folder has no git remote yet. To go live: create a GitHub repository, push `main`, and in the repository's Settings -> Pages set Source to "GitHub Actions". The build uses a relative base, so it works at `https://<user>.github.io/<repo>/` with no further configuration.
 
 Debug: `T` toggles a x20 fast-forward of the day cycle. In dev builds `window.__cs` exposes the cycle, pipeline, boat, etc. (`__cs.cycle.setTime(seconds)`, `__cs.setQuality('low')`, `__cs.step(seconds)` to advance the simulation in fixed steps without waiting on real time).
 
@@ -67,10 +72,22 @@ Console is clean in Chrome through start, play and a hide/show cycle (checked 20
 - Cap of 30: the oldest fades out over 4 s, then is dropped. `clear()` fades everything and empties storage at once.
 - `src/game/persistence.ts`: `localStorage` key `celestial-sea.sky.v1`, every access in try/catch, loaded data validated and re-normalised. Saved on every settle. Only settled stars are saved; an unfinished constellation resumes next session.
 - Wiring in `main.ts`: `releaseLantern()` (rate limit 1.5 s, needs a free pool slot) reserves, releases, ripples and plays the pluck; `onLanternSettle` plays the glockenspiel note and schedules the completion swell 0.9 s later.
-- Dev key `C` clears the sky until the settings panel ("Clear my sky") exists in milestone 5.
+- Dev key `C` clears the sky without the confirm step (the real control is "Clear my sky" in the settings panel).
 - Tests: `tests/sky.test.ts` covers storage failure modes, 5 to 7 star constellations in landscape and portrait, in-flight chaining, the cap, resume after reload, clear, and the out-of-view case.
 
 Checked in Chrome: flight path, linking, completion (8 releases gave 8 settle notes and 1 swell), reload restores the sky and resumes the unfinished constellation, clear empties sky and storage, console clean. Draw calls on high measured at 31 with lanterns in flight and constellations on screen (budget 150).
+
+## Milestone 5: Polish and ship (done)
+
+- `src/ui/settings.ts`: one quiet button in the top-right corner (safe-area aware, shown once play begins) and its panel: music / effects / ambience volume, quality (Auto / High / Low), 30 fps battery mode, "Clear my sky" with a confirm step, and credits rendered from `CREDITS.md` (imported with `?raw`, built as DOM nodes). Escape or a click outside closes it. While open, steering and lanterns are paused (`input.enabled = false`) but the world keeps running.
+- Settings persist under `celestial-sea.settings.v1` (`loadSettings` / `saveSettings` in `persistence.ts`, validated, try/catch).
+- `src/render/autoQuality.ts` (pure, unit-tested): `frameDue()` caps rendering at 60 fps even on 120 Hz screens, or 30 in battery mode. `AutoQuality` keeps a 90-frame rolling window; average frame time 22% over target for 2.5 s steps down one tier (high -> medium -> low); 25 s on target earns one step up, and if that step turns slow within 12 s it steps back and doubles the wait (up to 10 min). Stalls over 0.5 s and the first 2.5 s after any change are ignored. Touch devices start Auto on `medium`.
+- New `medium` tier (DPR 1.5, no MSAA, reflections on, 4 bloom levels, no grain). Tier table is `QUALITY` in `config.ts`.
+- PWA: `vite-plugin-pwa` generates the manifest (relative `start_url` / `scope`, `display: fullscreen`) and a Workbox service worker that precaches everything including all 32 samples (about 3.8 MB). Registered by the injected `registerSW.js`; production builds only.
+- Icons: `scripts/make-icons.mjs` draws them (dusk-gradient circle with one star) and writes PNGs with a tiny built-in encoder. Output is committed in `public/icons/`.
+- `input.ts`: the document-level touch blocking now lets touches through inside `[data-allow-touch]` (the panel), and keys are only swallowed while input is enabled, so sliders work by touch and keyboard.
+
+Checked in Chrome: every control, settings and sky surviving reload, Escape, clear-with-confirm, all three tiers rendering and switching without errors. The production build was served under a subpath (`/celestial-sea/`): service worker active with the right scope, 42 cached entries of which 32 are samples; with the server then stopped the page reloaded, started, and loaded its samples from cache.
 
 ## Decisions worth knowing
 
@@ -89,4 +106,8 @@ Checked in Chrome: flight path, linking, completion (8 releases gave 8 settle no
 - An unexplained event during this session emptied `node_modules/expect-type/dist` (vitest then fails to start). `rm -rf node_modules/expect-type && npm install` fixes it.
 
 - Not yet run on a real iPhone. MSAA on a half-float render target and the half-float bloom chain should be confirmed in iOS Safari.
-- Auto quality (frame-time based tier switching) is milestone 5; for now the tier is fixed at `high`.
+- **Auto quality has only been tested as logic** (synthetic frame times). Whether its thresholds feel right on a real iPhone, and whether tier switches cause a visible hitch, is unknown.
+- **Install to Home Screen and offline are verified in Chrome only.** iOS Safari install, full-screen behaviour, safe areas with a notch, and the ringer-switch audio session all need a real phone.
+- Nobody has run a full 20-minute loop start to finish in real time.
+- `npm audit` reports moderate advisories in `vite-plugin-pwa`'s build-time dependencies (`glob` / `minimatch` via `workbox-build`). They run only during `npm run build` on patterns we control and ship nothing to players. The offered fix is a downgrade to 1.1.0; left alone on purpose.
+- Sliders in the settings panel have not been dragged on a real touch screen.

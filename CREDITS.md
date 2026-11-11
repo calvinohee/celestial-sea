@@ -22,7 +22,12 @@ Glockenspiel and marimba files sound one octave above their original file names;
 
 Pad, water, wind and the fallback bell are synthesised with Tone.js.
 
+## Artwork
+
+Sky, water, ridges, boat and the app icon are all drawn procedurally in code. There are no image assets.
+
 ## Libraries
 
 - three.js (MIT)
 - Tone.js (MIT)
+- Workbox, via vite-plugin-pwa (MIT), for offline caching

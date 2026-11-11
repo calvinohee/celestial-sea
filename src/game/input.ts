@@ -24,8 +24,7 @@ const RIGHT_KEYS = new Set(['KeyD', 'ArrowRight']);
  * Also shuts down every browser gesture that would scroll, zoom or select.
  */
 export class Input {
-  /** Ignored until the start screen has been dismissed. */
-  enabled = false;
+  private active = false;
   readonly steer: SteerState = { active: false, targetX: 0, targetZ: 0, thrust: 0, turn: 0 };
 
   private pointerId: number | null = null;
@@ -36,6 +35,16 @@ export class Input {
   private downTime = 0;
   private moved = false;
   private readonly keys = new Set<string>();
+
+  /** Off until the title card has gone, and while the settings panel is open. */
+  get enabled(): boolean {
+    return this.active;
+  }
+
+  set enabled(value: boolean) {
+    this.active = value;
+    if (!value) this.releaseAll();
+  }
 
   private readonly ray = new Vector3();
   private readonly hit = new Vector3();
@@ -59,7 +68,15 @@ export class Input {
     for (const type of ['gesturestart', 'gesturechange', 'gestureend', 'contextmenu', 'dblclick', 'selectstart']) {
       document.addEventListener(type, block, { passive: false });
     }
-    document.addEventListener('touchmove', block, { passive: false });
+    // The settings panel opts back in to native touch (sliders, scrolling).
+    document.addEventListener(
+      'touchmove',
+      (e) => {
+        const target = e.target as Element | null;
+        if (!target?.closest?.('[data-allow-touch]')) e.preventDefault();
+      },
+      { passive: false },
+    );
     let lastTouchEnd = 0;
     document.addEventListener(
       'touchend',
@@ -144,8 +161,9 @@ export class Input {
   private readonly onKeyDown = (e: KeyboardEvent): void => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const steering = FORWARD_KEYS.has(e.code) || BACK_KEYS.has(e.code) || LEFT_KEYS.has(e.code) || RIGHT_KEYS.has(e.code);
-    if (steering || e.code === 'Space') e.preventDefault();
+    // While disabled (title card, settings panel) keys keep their normal meaning.
     if (!this.enabled) return;
+    if (steering || e.code === 'Space') e.preventDefault();
     if (steering) {
       this.keys.add(e.code);
     } else if (!e.repeat) {

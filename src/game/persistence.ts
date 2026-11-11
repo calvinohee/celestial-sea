@@ -1,4 +1,4 @@
-import { CONSTELLATIONS } from '../config';
+import { CONSTELLATIONS, type QualityMode } from '../config';
 
 /** One saved constellation: star directions in the rotating star frame. */
 export interface SavedConstellation {
@@ -93,5 +93,65 @@ export function clearSky(store: SkyStore | null = defaultStore()): void {
     store?.removeItem(KEY);
   } catch {
     /* nothing to clear */
+  }
+}
+
+// --- Settings ---------------------------------------------------------------
+
+export interface Settings {
+  /** Volumes, 0..1. */
+  music: number;
+  effects: number;
+  ambience: number;
+  quality: QualityMode;
+  /** 30 fps battery mode. */
+  battery: boolean;
+}
+
+export const DEFAULT_SETTINGS: Readonly<Settings> = {
+  music: 0.8,
+  effects: 0.8,
+  ambience: 0.7,
+  quality: 'auto',
+  battery: false,
+};
+
+const SETTINGS_KEY = 'celestial-sea.settings.v1';
+
+function volume(raw: unknown, fallback: number): number {
+  const v = typeof raw === 'number' ? raw : NaN;
+  return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : fallback;
+}
+
+/** Fill in anything missing or invalid with defaults. */
+export function sanitiseSettings(raw: unknown): Settings {
+  const r = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+  const quality = r.quality === 'high' || r.quality === 'low' || r.quality === 'auto' ? r.quality : DEFAULT_SETTINGS.quality;
+  return {
+    music: volume(r.music, DEFAULT_SETTINGS.music),
+    effects: volume(r.effects, DEFAULT_SETTINGS.effects),
+    ambience: volume(r.ambience, DEFAULT_SETTINGS.ambience),
+    quality,
+    battery: r.battery === true,
+  };
+}
+
+export function loadSettings(store: SkyStore | null = defaultStore()): Settings {
+  if (!store) return { ...DEFAULT_SETTINGS };
+  try {
+    const text = store.getItem(SETTINGS_KEY);
+    return sanitiseSettings(text ? JSON.parse(text) : null);
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+export function saveSettings(settings: Settings, store: SkyStore | null = defaultStore()): boolean {
+  if (!store) return false;
+  try {
+    store.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    return true;
+  } catch {
+    return false;
   }
 }

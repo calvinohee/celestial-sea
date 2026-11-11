@@ -272,7 +272,11 @@ export const CONSTELLATIONS = {
 // Rendering quality
 // ---------------------------------------------------------------------------
 
-export type QualityTier = 'high' | 'low';
+export type QualityTier = 'high' | 'medium' | 'low';
+/** What the player chooses. Auto moves between the tiers on its own. */
+export type QualityMode = 'auto' | 'high' | 'low';
+/** Tiers from best to cheapest. */
+export const QUALITY_ORDER: QualityTier[] = ['high', 'medium', 'low'];
 
 export interface QualitySettings {
   maxDpr: number;
@@ -285,7 +289,32 @@ export interface QualitySettings {
 
 export const QUALITY: Record<QualityTier, QualitySettings> = {
   high: { maxDpr: 2, msaa: 4, reflections: true, bloomLevels: 5, grain: true, stars: SKY.starCount },
-  low: { maxDpr: 1.35, msaa: 0, reflections: false, bloomLevels: 3, grain: false, stars: SKY.starCountLow },
+  medium: { maxDpr: 1.5, msaa: 0, reflections: true, bloomLevels: 4, grain: false, stars: 4500 },
+  low: { maxDpr: 1.3, msaa: 0, reflections: false, bloomLevels: 3, grain: false, stars: SKY.starCountLow },
+};
+
+export const FRAME = {
+  /** Rendering is capped here even on 120 Hz screens. */
+  fps: 60,
+  /** Battery mode. */
+  batteryFps: 30,
+};
+
+/** Auto quality: when to step down, and how carefully to step back up. */
+export const AUTO_QUALITY = {
+  /** Frames in the rolling window. */
+  window: 90,
+  /** Ignore frame times for this long after start or a tier change (shader/target warm-up). */
+  settleSeconds: 2.5,
+  /** Step down when the average frame is this much slower than target for `downSeconds`. */
+  slowRatio: 1.22,
+  downSeconds: 2.5,
+  /** Try a better tier after this long on target; the wait doubles each time a try fails. */
+  upSeconds: 25,
+  maxUpSeconds: 600,
+  goodRatio: 1.08,
+  /** A step up that turns slow again within this long counts as a failed try. */
+  trialSeconds: 12,
 };
 
 export const POST = {

@@ -1,11 +1,12 @@
 import { Scene } from 'three';
 import { AudioEngine } from './audio/engine';
 import { prefetchSamples } from './audio/instruments';
-import { BOAT, DEBUG_TIME_SCALE, LANTERN_COOLDOWN, type QualityTier } from './config';
+import { BOAT, DEBUG_TIME_SCALE, FRAME, LANTERN_COOLDOWN, type QualityTier } from './config';
 import { Constellations, type Reservation } from './game/constellations';
 import { Input } from './game/input';
 import { Lanterns } from './game/lanterns';
-import { loadSky } from './game/persistence';
+import { loadSettings, loadSky, saveSettings } from './game/persistence';
+import { AutoQuality, frameDue } from './render/autoQuality';
 import { Boat } from './render/boat';
 import { CameraRig } from './render/camera';
 import { RenderPipeline } from './render/renderer';
@@ -15,14 +16,23 @@ import { createSkyUniforms, Sky, updateSkyUniforms } from './render/sky';
 import { Stars } from './render/stars';
 import { Water } from './render/water';
 import { DayCycle } from './time/dayCycle';
+import { SettingsPanel } from './ui/settings';
 import { showStartScreen } from './ui/startScreen';
 import { createNoiseTexture } from './util/noise';
 
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
 const ui = document.getElementById('ui') as HTMLElement;
 
+const settings = loadSettings();
 const audio = new AudioEngine();
+audio.setVolume('music', settings.music);
+audio.setVolume('effects', settings.effects);
+audio.setVolume('ambience', settings.ambience);
 prefetchSamples();
+
+// Auto quality starts phones a notch lower and lets them earn the top tier.
+const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+const quality = new AutoQuality(settings.quality, coarsePointer ? 'medium' : 'high');
 
 const cycle = new DayCycle();
 const pipeline = new RenderPipeline(canvas);
@@ -99,7 +109,7 @@ const input = new Input(canvas, rig.camera, {
       console.info(`[celestial] time x${cycle.timeScale} (${cycle.phaseName})`);
     }
     if (import.meta.env.DEV) {
-      // Audition sounds on demand; C clears the sky until the settings panel exists.
+      // Audition sounds on demand; C clears the sky without the confirm step.
       if (code === 'Digit1') audio.music?.starSettle();
       if (code === 'Digit2') audio.music?.constellationComplete();
       if (code === 'Digit3') stars.triggerShootingStar(rig.camera);
@@ -111,12 +121,29 @@ const input = new Input(canvas, rig.camera, {
 stars.onShootingStar = () => audio.music?.shootingStar();
 canvas.addEventListener('pointerdown', () => audio.ensureRunning());
 
+const settingsPanel = new SettingsPanel(ui, settings, {
+  onChange(s, key) {
+    if (key === 'music' || key === 'effects' || key === 'ambience') audio.setVolume(key, s[key]);
+    if (key === 'quality') setQuality(quality.setMode(s.quality));
+    if (key === 'battery') quality.reset();
+    saveSettings(s);
+  },
+  onClearSky() {
+    constellations.clear(elapsed);
+  },
+  onOpenChange(open) {
+    // Steering and lanterns pause while the panel is up; the world carries on.
+    input.enabled = !open;
+  },
+});
+
 // Title card. The first tap unlocks audio (required on iOS), then play begins.
 showStartScreen(ui, () => {
   void audio.start();
+  settingsPanel.show();
   // Enable input a moment later so the starting tap is not also a lantern.
   window.setTimeout(() => {
-    input.enabled = true;
+    if (!settingsPanel.open) input.enabled = true;
   }, 450);
 });
 
@@ -133,10 +160,14 @@ pipeline.onResize = (bw, bh, pixelRatio) => {
   constellations.setResolution(bw, bh, pixelRatio);
 };
 pipeline.resize();
-setQuality('high');
+setQuality(quality.tier);
 
-window.addEventListener('resize', () => pipeline.resize());
-window.visualViewport?.addEventListener('resize', () => pipeline.resize());
+const onViewportChange = (): void => {
+  pipeline.resize();
+  quality.reset();
+};
+window.addEventListener('resize', onViewportChange);
+window.visualViewport?.addEventListener('resize', onViewportChange);
 
 /** Distance from the boat's centre back to its stern, and forward to its bow. */
 const STERN_OFFSET = 2.1;
@@ -163,9 +194,15 @@ let raf = 0;
 
 function frame(now: number): void {
   raf = requestAnimationFrame(frame);
-  const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
+  // 60 fps (even on 120 Hz screens), or 30 in battery mode.
+  const fps = settings.battery ? FRAME.batteryFps : FRAME.fps;
+  const since = now - last;
+  if (!frameDue(since, fps)) return;
   last = now;
-  tick(dt);
+
+  const tier = quality.sample(since / 1000, 1 / fps);
+  if (tier) setQuality(tier);
+  tick(Math.min(0.1, Math.max(0, since / 1000)));
 }
 
 function tick(dt: number): void {
@@ -209,6 +246,7 @@ function tick(dt: number): void {
 
 function start(): void {
   if (raf) return;
+  quality.reset();
   last = performance.now();
   raf = requestAnimationFrame(frame);
 }
@@ -247,6 +285,9 @@ if (import.meta.env.DEV) {
     constellations,
     lanterns,
     releaseLantern,
+    settings,
+    quality,
+    settingsPanel,
     /** Simulation clock in seconds. */
     get elapsed() {
       return elapsed;
