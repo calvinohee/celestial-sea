@@ -1,4 +1,6 @@
 import { Scene } from 'three';
+import { AudioEngine } from './audio/engine';
+import { prefetchSamples } from './audio/instruments';
 import { BOAT, DEBUG_TIME_SCALE, LANTERN_COOLDOWN, type QualityTier } from './config';
 import { Input } from './game/input';
 import { Boat } from './render/boat';
@@ -10,9 +12,14 @@ import { createSkyUniforms, Sky, updateSkyUniforms } from './render/sky';
 import { Stars } from './render/stars';
 import { Water } from './render/water';
 import { DayCycle } from './time/dayCycle';
+import { showStartScreen } from './ui/startScreen';
 import { createNoiseTexture } from './util/noise';
 
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
+const ui = document.getElementById('ui') as HTMLElement;
+
+const audio = new AudioEngine();
+prefetchSamples();
 
 const cycle = new DayCycle();
 const pipeline = new RenderPipeline(canvas);
@@ -35,13 +42,15 @@ let elapsed = 0;
 let lastRelease = -Infinity;
 
 const input = new Input(canvas, rig.camera, {
-  onWaterTouch(x, z) {
+  onWaterTouch(x, z, screenX) {
     ripples.spawn(x, z, 1, 1);
+    audio.music?.waterTouch(screenX);
   },
   onRelease() {
-    // Lanterns arrive in milestone 4; the calm rate limit already applies.
+    // Calm rate limit. The lantern itself arrives in milestone 4; its sound is already here.
     if (elapsed - lastRelease < LANTERN_COOLDOWN) return;
     lastRelease = elapsed;
+    audio.music?.lanternRelease();
   },
   onKey(code) {
     // Debug: T toggles a x20 fast-forward of the day cycle.
@@ -49,9 +58,26 @@ const input = new Input(canvas, rig.camera, {
       cycle.timeScale = cycle.timeScale === 1 ? DEBUG_TIME_SCALE : 1;
       console.info(`[celestial] time x${cycle.timeScale} (${cycle.phaseName})`);
     }
+    if (import.meta.env.DEV) {
+      // Audition sounds whose triggers are not built yet.
+      if (code === 'Digit1') audio.music?.starSettle();
+      if (code === 'Digit2') audio.music?.constellationComplete();
+      if (code === 'Digit3') stars.triggerShootingStar(rig.camera);
+    }
   },
 });
-input.enabled = true;
+
+stars.onShootingStar = () => audio.music?.shootingStar();
+canvas.addEventListener('pointerdown', () => audio.ensureRunning());
+
+// Title card. The first tap unlocks audio (required on iOS), then play begins.
+showStartScreen(ui, () => {
+  void audio.start();
+  // Enable input a moment later so the starting tap is not also a lantern.
+  window.setTimeout(() => {
+    input.enabled = true;
+  }, 450);
+});
 
 function setQuality(tier: QualityTier): void {
   pipeline.setQuality(tier);
@@ -105,6 +131,7 @@ function tick(dt: number): void {
 
   cycle.update(dt);
   updateSkyUniforms(skyUniforms, cycle);
+  audio.setPhase(cycle.phaseName, cycle.darkness);
 
   input.update();
   boat.update(dt, elapsed, input.steer, cycle);
@@ -143,9 +170,15 @@ function stop(): void {
   raf = 0;
 }
 
+// Hidden: stop rendering, fade and suspend audio. Visible: pick both back up.
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) stop();
-  else start();
+  if (document.hidden) {
+    stop();
+    audio.suspend();
+  } else {
+    start();
+    audio.resume();
+  }
 });
 
 start();
@@ -162,6 +195,7 @@ if (import.meta.env.DEV) {
     boat,
     input,
     ripples,
+    audio,
     setQuality,
     /** Advance the simulation by `seconds` in fixed steps (browser-independent testing). */
     step(seconds: number, fps = 60) {
