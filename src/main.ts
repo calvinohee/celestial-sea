@@ -1,11 +1,12 @@
-import { Scene } from 'three';
+import { Scene, type Vector3 } from 'three';
 import { AudioEngine } from './audio/engine';
 import { prefetchSamples } from './audio/instruments';
-import { BOAT, DEBUG_TIME_SCALE, FRAME, LANTERN_COOLDOWN, type QualityTier } from './config';
+import { BOAT, COMFORT, DEBUG_TIME_SCALE, FRAME, LANTERN_COOLDOWN, WATER_SIM, type QualityTier } from './config';
 import { Constellations, type Reservation } from './game/constellations';
+import { Floaters } from './game/floaters';
 import { Input } from './game/input';
 import { Lanterns } from './game/lanterns';
-import { loadSettings, loadSky, saveSettings } from './game/persistence';
+import { deviceDefaults, loadSettings, loadSky, saveSettings } from './game/persistence';
 import { AutoQuality, frameDue } from './render/autoQuality';
 import { Boat } from './render/boat';
 import { CameraRig } from './render/camera';
@@ -14,7 +15,9 @@ import { Ridges } from './render/ridges';
 import { Ripples, Wake } from './render/ripples';
 import { createSkyUniforms, Sky, updateSkyUniforms } from './render/sky';
 import { Stars } from './render/stars';
+import { swellScale } from './render/swell';
 import { Water } from './render/water';
+import { WaterSim } from './render/waterSim';
 import { DayCycle } from './time/dayCycle';
 import { SettingsPanel } from './ui/settings';
 import { showStartScreen } from './ui/startScreen';
@@ -23,7 +26,7 @@ import { createNoiseTexture } from './util/noise';
 const canvas = document.getElementById('scene') as HTMLCanvasElement;
 const ui = document.getElementById('ui') as HTMLElement;
 
-const settings = loadSettings();
+const settings = loadSettings(undefined, deviceDefaults());
 const audio = new AudioEngine();
 audio.setVolume('music', settings.music);
 audio.setVolume('effects', settings.effects);
@@ -35,6 +38,7 @@ const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
 const quality = new AutoQuality(settings.quality, coarsePointer ? 'medium' : 'high');
 
 const cycle = new DayCycle();
+cycle.loopMinutes = settings.dayMinutes;
 const pipeline = new RenderPipeline(canvas);
 const scene = new Scene();
 const noise = createNoiseTexture();
@@ -43,12 +47,14 @@ const skyUniforms = createSkyUniforms(cycle);
 const stars = new Stars();
 const sky = new Sky(skyUniforms, noise, stars.skyRotation);
 const ridges = new Ridges(skyUniforms);
-const water = new Water(skyUniforms, noise, ridges.profile);
+const waterSim = new WaterSim();
+const water = new Water(skyUniforms, noise, ridges.profile, waterSim.uniforms);
 const ripples = new Ripples();
 const wake = new Wake(noise);
 const boat = new Boat();
 const constellations = new Constellations(loadSky());
 const lanterns = new Lanterns();
+const floaters = new Floaters();
 scene.add(
   sky.mesh,
   stars.group,
@@ -59,6 +65,7 @@ scene.add(
   ripples.mesh,
   boat.group,
   boat.lights,
+  floaters.mesh,
   lanterns.mesh,
 );
 
@@ -69,19 +76,25 @@ let lastRelease = -Infinity;
 /** When to play the constellation-complete swell (just after its last star lands). */
 let fanfareAt = Infinity;
 
-/** Release a lantern from the boat. Always allowed, but never faster than the calm rate limit. */
-function releaseLantern(): boolean {
-  if (elapsed - lastRelease < LANTERN_COOLDOWN || !lanterns.hasFree) return false;
+const canRelease = (): boolean => elapsed - lastRelease >= LANTERN_COOLDOWN && lanterns.hasFree;
+
+/**
+ * Send a lantern up from `from`. Always allowed, but never faster than the
+ * calm rate limit. `carried` is true for lanterns let go from the moving boat.
+ */
+function releaseLantern(from: Vector3 = boat.lanternPosition, carried = true): boolean {
+  if (!canRelease()) return false;
   lastRelease = elapsed;
   const reservation = constellations.reserve(rig.camera, stars.quaternion, elapsed);
   lanterns.release(
-    boat.lanternPosition,
+    from,
     elapsed,
     reservation,
-    Math.sin(boat.heading) * boat.speed,
-    -Math.cos(boat.heading) * boat.speed,
+    carried ? Math.sin(boat.heading) * boat.speed : 0,
+    carried ? -Math.cos(boat.heading) * boat.speed : 0,
   );
-  ripples.spawn(boat.x, boat.z, 0.3, 0.6);
+  ripples.spawn(from.x, from.z, 0.3, 0.6);
+  waterSim.addImpulse(from.x, from.z, 0.6, -0.025);
   audio.music?.lanternRelease();
   return true;
 }
@@ -97,6 +110,7 @@ function onLanternSettle(reservation: Reservation): void {
 const input = new Input(canvas, rig.camera, {
   onWaterTouch(x, z, screenX) {
     ripples.spawn(x, z, 1, 1);
+    waterSim.addImpulse(x, z, 0.5, 0.05);
     audio.music?.waterTouch(screenX);
   },
   onRelease() {
@@ -126,6 +140,8 @@ const settingsPanel = new SettingsPanel(ui, settings, {
     if (key === 'music' || key === 'effects' || key === 'ambience') audio.setVolume(key, s[key]);
     if (key === 'quality') setQuality(quality.setMode(s.quality));
     if (key === 'battery') quality.reset();
+    if (key === 'reduceMotion') applyComfort();
+    if (key === 'dayMinutes') cycle.loopMinutes = s.dayMinutes;
     saveSettings(s);
   },
   onClearSky() {
@@ -147,8 +163,18 @@ showStartScreen(ui, () => {
   }, 450);
 });
 
+/** Calm by default; calmer still with Reduce motion. */
+function applyComfort(): void {
+  const comfort = settings.reduceMotion ? COMFORT.reduced : COMFORT.normal;
+  rig.comfort = comfort;
+  boat.comfort = comfort;
+  swellScale.value = comfort.swell;
+}
+applyComfort();
+
 function setQuality(tier: QualityTier): void {
   pipeline.setQuality(tier);
+  waterSim.setSize(tier === 'low' ? WATER_SIM.sizeLow : WATER_SIM.size);
   water.reflections = pipeline.settings.reflections;
   stars.setCount(pipeline.settings.stars);
 }
@@ -173,20 +199,27 @@ window.visualViewport?.addEventListener('resize', onViewportChange);
 const STERN_OFFSET = 2.1;
 const BOW_OFFSET = 1.9;
 
-// The boat sheds its own faint rings: at the bow under way, and now and then at rest.
-let bowRippleTimer = 0;
-function updateBoatRipples(dt: number): void {
-  const speed01 = boat.speed / BOAT.maxSpeed;
-  bowRippleTimer -= dt * (0.25 + speed01 * 1.4);
-  if (bowRippleTimer > 0) return;
-  bowRippleTimer = 1.1 + Math.random() * 0.5;
-  const ahead = speed01 > 0.08 ? BOW_OFFSET : 0;
-  ripples.spawn(
-    boat.x + Math.sin(boat.heading) * ahead,
-    boat.z - Math.cos(boat.heading) * ahead,
-    0.12 + 0.2 * speed01,
-    0.5 + 0.3 * speed01,
-  );
+// The hull disturbs the water: it pushes up a bow wave and leaves a hollow
+// astern, which the simulation turns into a spreading wake. At rest, the
+// boat's gentle bobbing sends out the occasional slow ring.
+let idleRing = 0;
+function disturbWater(dt: number): void {
+  const speed = boat.speed;
+  const fx = Math.sin(boat.heading);
+  const fz = -Math.cos(boat.heading);
+  if (speed > 0.15) {
+    const push = speed * dt * 0.03;
+    waterSim.addImpulse(boat.x + fx * BOW_OFFSET, boat.z + fz * BOW_OFFSET, 0.75, push);
+    // Sized to take away what the bow pushed up, so the sea's level does not drift.
+    waterSim.addImpulse(boat.x - fx * STERN_OFFSET, boat.z - fz * STERN_OFFSET, 0.9, -push * 0.69);
+    idleRing = 1.2;
+  } else {
+    idleRing -= dt;
+    if (idleRing <= 0) {
+      idleRing = 2.6 + Math.random() * 1.2;
+      waterSim.addImpulse(boat.x, boat.z, 1.1, 0.012 * boat.comfort.bob);
+    }
+  }
 }
 
 let last = performance.now();
@@ -219,6 +252,9 @@ function tick(dt: number): void {
 
   sky.update(cycle);
   stars.update(dt, elapsed, cycle, camera);
+  // Gliding up to a lantern afloat lights it from the boat's own.
+  const lit = floaters.update(dt, elapsed, boat, cycle, canRelease());
+  if (lit) releaseLantern(lit, false);
   lanterns.update(elapsed, camera, stars.quaternion, 0.8 + 0.2 * cycle.darkness, onLanternSettle);
   constellations.update(elapsed, cycle, camera, stars.quaternion);
   if (elapsed >= fanfareAt) {
@@ -228,18 +264,19 @@ function tick(dt: number): void {
   ridges.update(camera);
   water.update(elapsed, cycle, camera);
   water.setLamp(boat.lanternPosition, boat.lanternLight);
-  updateBoatRipples(dt);
+  disturbWater(dt);
   ripples.update(elapsed, cycle);
   wake.update(
     elapsed,
     boat.x - Math.sin(boat.heading) * STERN_OFFSET,
     boat.z + Math.cos(boat.heading) * STERN_OFFSET,
     boat.heading,
-    boat.speed / BOAT.maxSpeed,
+    boat.speed / (BOAT.maxSpeed * boat.comfort.speed),
     cycle,
   );
 
   pipeline.renderer.info.reset();
+  waterSim.update(pipeline.renderer, dt, boat.x, boat.z);
   water.renderReflection(pipeline.renderer, scene, camera);
   pipeline.render(scene, camera, cycle.exposure, elapsed);
 }
@@ -287,6 +324,8 @@ if (import.meta.env.DEV) {
     releaseLantern,
     settings,
     quality,
+    floaters,
+    waterSim,
     settingsPanel,
     /** Simulation clock in seconds. */
     get elapsed() {

@@ -16,6 +16,13 @@ const WAVES: Wave[] = WATER.swell.map((s) => {
   return { dx: s.dir[0] / len, dz: s.dir[1] / len, k, w: k * s.speed, amp: s.amp };
 });
 
+/**
+ * Overall swell height, shared by reference with every shader that includes
+ * SWELL_GLSL (as `uSwellScale`) and used by the CPU sampler, so the comfort
+ * settings scale what is drawn and what the boat rides together.
+ */
+export const swellScale = { value: 1 };
+
 export interface SwellSample {
   height: number;
   /** dHeight/dx and dHeight/dz. */
@@ -36,9 +43,10 @@ export function sampleSwell(x: number, z: number, t: number, out: SwellSample): 
     gx += c * w.dx;
     gz += c * w.dz;
   }
-  out.height = h;
-  out.gx = gx;
-  out.gz = gz;
+  const k = swellScale.value;
+  out.height = h * k;
+  out.gx = gx * k;
+  out.gz = gz * k;
   return out;
 }
 
@@ -46,6 +54,7 @@ const n = (v: number) => v.toFixed(6);
 
 /** `vec3 swell(vec2 p, float t)`: x = height, yz = gradient (d/dx, d/dz). */
 export const SWELL_GLSL = /* glsl */ `
+uniform float uSwellScale;
 vec3 swell(vec2 p, float t) {
   vec3 r = vec3(0.0);
   float ph;
@@ -55,6 +64,6 @@ ${WAVES.map(
   c = ${n(w.amp * w.k)} * cos(ph);
   r += vec3(${n(w.amp)} * sin(ph), c * ${n(w.dx)}, c * ${n(w.dz)});`,
 ).join('\n')}
-  return r;
+  return r * uSwellScale;
 }
 `;

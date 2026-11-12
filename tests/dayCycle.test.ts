@@ -1,14 +1,30 @@
 import { Color } from 'three';
 import { describe, expect, it } from 'vitest';
-import { LOOP_SECONDS, PHASES } from '../src/config';
+import { CYCLE, LOOP_SECONDS, PHASES } from '../src/config';
 import { DayCycle, phaseBlendAt, type PhaseBlend } from '../src/time/dayCycle';
 
 const blend = (): PhaseBlend => ({ index: 0, next: 0, mix: 0, progress: 0 });
 
 describe('day cycle', () => {
-  it('is a 20 minute loop with the spec phase lengths', () => {
+  it('keeps the spec phase proportions on its reference timeline', () => {
     expect(LOOP_SECONDS).toBe(20 * 60);
     expect(PHASES.map((p) => p.duration / 60)).toEqual([3, 6, 3, 6, 2]);
+  });
+
+  it('runs a full loop in the chosen number of real minutes (8 by default)', () => {
+    const cycle = new DayCycle();
+    expect(cycle.loopMinutes).toBeCloseTo(CYCLE.defaultMinutes, 6);
+    // Half the real loop later the clock is half way round the reference timeline.
+    for (let i = 0; i < CYCLE.defaultMinutes * 30; i++) cycle.update(1);
+    expect(cycle.time).toBeCloseTo(LOOP_SECONDS / 2, 3);
+    for (const minutes of CYCLE.options) {
+      const c = new DayCycle();
+      c.loopMinutes = minutes;
+      for (let i = 0; i < minutes * 60 - 1; i++) c.update(1);
+      expect(c.phaseName).toBe('predawn');
+      c.update(2);
+      expect(c.phaseName).toBe('golden');
+    }
   });
 
   it('starts every session at pure golden hour', () => {
@@ -68,6 +84,7 @@ describe('day cycle', () => {
 
   it('wraps time and honours the debug time scale', () => {
     const cycle = new DayCycle();
+    cycle.loopMinutes = 20;
     cycle.timeScale = 20;
     cycle.update(10);
     expect(cycle.time).toBeCloseTo(200, 6);

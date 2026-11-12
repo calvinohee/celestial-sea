@@ -1,5 +1,5 @@
 import creditsText from '../../CREDITS.md?raw';
-import type { QualityMode } from '../config';
+import { CYCLE, type QualityMode } from '../config';
 import type { Settings } from '../game/persistence';
 
 export interface SettingsHandlers {
@@ -95,10 +95,10 @@ export function renderCredits(markdown: string): HTMLElement {
   return root;
 }
 
-const QUALITY_OPTIONS: { mode: QualityMode; label: string }[] = [
-  { mode: 'auto', label: 'Auto' },
-  { mode: 'high', label: 'High' },
-  { mode: 'low', label: 'Low' },
+const QUALITY_OPTIONS: { value: QualityMode; label: string }[] = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'high', label: 'High' },
+  { value: 'low', label: 'Low' },
 ];
 
 const ICON = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
@@ -109,13 +109,13 @@ const ICON = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"
 
 /**
  * The only chrome in the game: a small, quiet button in the corner and the
- * panel it opens. Volumes, quality, battery mode, "Clear my sky" and credits.
+ * panel it opens. Volumes, quality, day length, comfort, battery mode,
+ * "Clear my sky" and credits.
  */
 export class SettingsPanel {
   private readonly button: HTMLButtonElement;
   private readonly backdrop: HTMLDivElement;
   private readonly panel: HTMLDivElement;
-  private readonly qualityButtons = new Map<QualityMode, HTMLButtonElement>();
   private isOpen = false;
 
   constructor(
@@ -150,8 +150,14 @@ export class SettingsPanel {
       this.slider('Music', 'music'),
       this.slider('Effects', 'effects'),
       this.slider('Ambience', 'ambience'),
-      this.quality(),
-      this.battery(),
+      this.segments('Quality', 'quality', QUALITY_OPTIONS),
+      this.segments(
+        'Day length (min)',
+        'dayMinutes',
+        CYCLE.options.map((m) => ({ value: m, label: String(m) })),
+      ),
+      this.switchRow('Reduce motion', 'reduceMotion'),
+      this.switchRow('30 fps battery mode', 'battery'),
       this.clearSky(),
       this.credits(),
     );
@@ -218,30 +224,36 @@ export class SettingsPanel {
     return row;
   }
 
-  private quality(): HTMLElement {
+  /** A row of mutually exclusive choices. */
+  private segments<K extends 'quality' | 'dayMinutes'>(
+    label: string,
+    key: K,
+    options: { value: Settings[K]; label: string }[],
+  ): HTMLElement {
     const row = el('div', 'settings-row');
-    row.append(el('span', 'settings-label', 'Quality'));
+    row.append(el('span', 'settings-label', label));
     const group = el('div', 'settings-segments');
     group.setAttribute('role', 'radiogroup');
-    group.setAttribute('aria-label', 'Quality');
+    group.setAttribute('aria-label', label);
+    const buttons: { value: Settings[K]; button: HTMLButtonElement }[] = [];
     const paint = (): void => {
-      for (const [mode, button] of this.qualityButtons) {
-        const on = mode === this.settings.quality;
+      for (const { value, button } of buttons) {
+        const on = value === this.settings[key];
         button.setAttribute('aria-checked', String(on));
         button.classList.toggle('on', on);
       }
     };
-    for (const option of QUALITY_OPTIONS) {
+    for (const option of options) {
       const button = el('button', 'settings-segment', option.label);
       button.type = 'button';
       button.setAttribute('role', 'radio');
       button.addEventListener('click', () => {
-        if (this.settings.quality === option.mode) return;
-        this.settings.quality = option.mode;
+        if (this.settings[key] === option.value) return;
+        this.settings[key] = option.value;
         paint();
-        this.handlers.onChange(this.settings, 'quality');
+        this.handlers.onChange(this.settings, key);
       });
-      this.qualityButtons.set(option.mode, button);
+      buttons.push({ value: option.value, button });
       group.append(button);
     }
     paint();
@@ -249,16 +261,16 @@ export class SettingsPanel {
     return row;
   }
 
-  private battery(): HTMLElement {
+  private switchRow(label: string, key: 'battery' | 'reduceMotion'): HTMLElement {
     const row = el('label', 'settings-row settings-toggle');
-    row.append(el('span', 'settings-label', '30 fps battery mode'));
+    row.append(el('span', 'settings-label', label));
     const input = el('input');
     input.type = 'checkbox';
     input.setAttribute('role', 'switch');
-    input.checked = this.settings.battery;
+    input.checked = this.settings[key];
     input.addEventListener('change', () => {
-      this.settings.battery = input.checked;
-      this.handlers.onChange(this.settings, 'battery');
+      this.settings[key] = input.checked;
+      this.handlers.onChange(this.settings, key);
     });
     row.append(input, el('span', 'settings-switch'));
     return row;

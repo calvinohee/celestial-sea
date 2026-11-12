@@ -106,8 +106,43 @@ export const PHASES: PhaseConfig[] = [
   },
 ];
 
-/** Full loop length in seconds (20 minutes). */
+/**
+ * Length of the reference timeline the phases above are written against
+ * (20 minutes). The real loop is shorter: the clock simply runs through this
+ * timeline faster, so phase proportions (3 : 6 : 3 : 6 : 2) never change.
+ */
 export const LOOP_SECONDS = PHASES.reduce((s, p) => s + p.duration, 0);
+
+export const CYCLE = {
+  /** Real minutes for one full loop. */
+  defaultMinutes: 8,
+  /** Choices offered in settings. */
+  options: [5, 8, 10],
+};
+
+/**
+ * Comfort. Everything that moves the camera or the horizon is scaled from
+ * here. `reduced` is the "Reduce motion" setting.
+ */
+export interface ComfortSettings {
+  /** Camera idle drift (1 = the original sway). */
+  sway: number;
+  /** Boat bob, pitch and roll. */
+  bob: number;
+  /** Boat turn rate. */
+  turn: number;
+  /** Fastest the camera may swing round, radians per second. */
+  cameraYawRate: number;
+  /** Boat top speed. */
+  speed: number;
+  /** Height of the swell. */
+  swell: number;
+}
+
+export const COMFORT: Record<'normal' | 'reduced', ComfortSettings> = {
+  normal: { sway: 0.25, bob: 0.6, turn: 0.72, cameraYawRate: 0.2, speed: 1, swell: 0.8 },
+  reduced: { sway: 0, bob: 0.25, turn: 0.5, cameraYawRate: 0.11, speed: 0.8, swell: 0.5 },
+};
 
 /** Debug fast-forward multiplier (toggle with `T`). */
 export const DEBUG_TIME_SCALE = 20;
@@ -183,6 +218,22 @@ export const WATER = {
   rippleStrength: 0.085,
 };
 
+/** The interactive wave simulation around the boat (see render/waterSim.ts). */
+export const WATER_SIM = {
+  /** Grid cells per side (the low tier uses `sizeLow`). */
+  size: 256,
+  sizeLow: 128,
+  /** Width of the simulated patch of sea, metres. */
+  worldSize: 64,
+  /** How fast ripples travel, metres per second. Slower than the boat, so it leaves a V wake. */
+  waveSpeed: 1.7,
+  stepsPerSecond: 60,
+  /** Fraction of a wave's motion kept each step. */
+  damping: 0.99,
+  /** How strongly the simulated waves tilt the water's surface normal. */
+  normalStrength: 0.8,
+};
+
 // ---------------------------------------------------------------------------
 // Boat, camera, input
 // ---------------------------------------------------------------------------
@@ -194,7 +245,7 @@ export const BOAT = {
   /** rad/s at full speed. */
   maxTurnRate: 0.42,
   /** rad/s^2: how quickly the turn rate itself may change. */
-  turnAcceleration: 0.55,
+  turnAcceleration: 0.38,
   /** Boat eases off inside this distance from the steering target. */
   arriveRadius: 14,
   lanternHeight: 1.36,
@@ -204,15 +255,15 @@ export const CAMERA = {
   /** Vertical FOV in landscape and in tall portrait. */
   fovLandscape: 50,
   fovPortrait: 74,
-  distance: 12,
-  height: 2.0,
+  distance: 13.5,
+  height: 2.3,
   /** Sideways offset so the boat sits slightly off-centre. */
   side: 1.1,
   /** Fraction of the screen height (from the bottom) where the horizon sits. */
   horizon: 1 / 3,
   /** Spring stiffness of the follow (higher = tighter). */
   followStiffness: 1.6,
-  headingStiffness: 0.9,
+  headingStiffness: 0.8,
   near: 0.3,
   far: 16000,
 };
@@ -252,6 +303,21 @@ export const LANTERNS = {
   drift: 6,
   /** Seconds the lantern takes to dissolve once its star has appeared. */
   fade: 0.8,
+};
+
+/** Unlit paper lanterns drifting on the water, lit by gliding the boat up to them. */
+export const FLOATERS = {
+  pool: 7,
+  /** New ones appear this far from the boat, metres (min, max), mostly ahead. */
+  spawn: [26, 60] as [number, number],
+  /** Never closer than this to each other. */
+  spacing: 16,
+  /** Gone (and replaced ahead) once this far away. */
+  despawn: 95,
+  /** The boat lights a lantern within this distance of its centre. */
+  reach: 4,
+  /** Within this distance a lantern drifts gently toward the boat. */
+  attract: 9,
 };
 
 export const CONSTELLATIONS = {

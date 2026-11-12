@@ -94,6 +94,19 @@ Checked in Chrome: flight path, linking, completion (8 releases gave 8 settle no
 
 Checked in Chrome: every control, settings and sky surviving reload, Escape, clear-with-confirm, all three tiers rendering and switching without errors. The production build was served under a subpath (`/celestial-sea/`): service worker active with the right scope, 42 cached entries of which 32 are samples; with the server then stopped the page reloaded, started, and loaded its samples from cache.
 
+## Round 2: owner feedback (2026-11-12)
+
+The owner asked for more boat detail, less motion (motion sickness), more water physics, a shorter day and a lantern mechanic that is not "press Space". Where these depart from `SPEC.md`, the owner's request wins.
+
+- **Day length:** default 8 minutes, with 5 / 8 / 10 in settings (`dayMinutes`). `PHASES` in `config.ts` still describes a 20-minute reference timeline; `DayCycle` just moves through it faster (`loopMinutes`), so phase proportions are unchanged.
+- **Comfort** (`COMFORT` in `config.ts`, applied by `applyComfort()` in `main.ts`): the camera has no yaw sway, a quarter of the old drift, and swings round at a capped, eased rate (0.2 rad/s; boat turns at up to 0.3). Boat bob / pitch / roll are 60% of before and the swell 80%. Camera sits a little higher and further back. **Reduce motion** in settings (on by default when the system asks for reduced motion) goes further: no drift, camera 0.11 rad/s, bob 25%, swell 50%, top speed 80%. The horizon never tilts in either mode. Swell height is one shared value (`swellScale` in `swell.ts`) used by every shader and by the CPU sampler.
+- **Water physics** (`src/render/waterSim.ts`): a 256 x 256 height-field wave simulation over a 64 m patch that follows the boat in whole cells (128 on the low tier), stepped at a fixed 60 Hz. Touches, the hull (bow pushes up, stern pulls down, scaled by speed) and lantern lift-offs add impulses; waves spread, cross and are absorbed at the border. Wave speed (1.7 m/s) is below the boat's, so a V wake forms on its own. The water shader reads the field for its normals and makes steep wave faces glow (bioluminescence by night, a faint glint by day). The old periodic "fake" rings from the boat are gone; the glow rings on touch and the wake ribbon remain, the ribbon much fainter.
+- **Lantern mechanic** (`src/game/floaters.ts`): seven unlit paper lanterns drift on the water, mostly ahead of the boat, never bunched, replaced as they fall behind. Glide within 4 m and one lights and rises (it drifts the last few metres toward the boat on its own). The first sits just off the bow so a straight course finds it. Tap and Space still release from the boat; all share the 1.5 s rate limit.
+- **Boat** (`src/render/boat.ts`): three strakes of planking, gunwale rail, stem post, ribs, floorboards, two thwarts, stern seat, foredeck with cleat, rudder and tiller, shipped oars with rowlocks, a rope coil, a crate of spare paper lanterns, tapered mast with stays and a pennant, lantern finial. 905 triangles, still one draw call (the spec's "a few hundred" was relaxed on request).
+- Settings gained `reduceMotion` and `dayMinutes`; older saved settings pick up defaults.
+
+Checked in Chrome: camera yaw rate measured at exactly the cap in both modes (0.20 and 0.11 rad/s), boat roll under 1 degree in Reduce motion, a straight course lights the first lantern with no input, V wake by day and glowing arms by night, both new settings saved and applied, low and high tiers render (23 and 34 draw calls). 45 unit tests.
+
 ## Decisions worth knowing
 
 - **Draw order:** sky (opaque, first) -> stars -> ridges -> water -> effects. Stars, ridges and water are in the transparent queue so `renderOrder` controls this; water uses `NoBlending` and still writes depth.
@@ -105,6 +118,10 @@ Checked in Chrome: every control, settings and sky surviving reload, Escape, cle
 - **Headings:** 0 faces -Z, positive turns toward +X; forward is `(sin h, 0, -cos h)`.
 
 ## Known issues / to check on device
+
+- **Comfort is tuned by numbers, not by a person who gets motion sick.** The owner needs to say whether the default is calm enough or whether Reduce motion should become the default.
+- The wave simulation adds one 256 x 256 pass per frame and four texture reads per water pixel. Not profiled on a phone.
+- The boat and floating lanterns ride the swell but not the simulated ripples (those only affect how the water is lit).
 
 - Audio: the owner listened on 2026-11-12 and found it soothing. Not yet heard on an iPhone speaker, and nobody has sat through a full 20-minute loop listening for clicks.
 - Constellations are placed for the screen shape in use. One built in landscape can run off the sides when viewed in portrait (only matters if the same saved sky is opened in both orientations).

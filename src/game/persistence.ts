@@ -1,4 +1,4 @@
-import { CONSTELLATIONS, type QualityMode } from '../config';
+import { CONSTELLATIONS, CYCLE, type QualityMode } from '../config';
 
 /** One saved constellation: star directions in the rotating star frame. */
 export interface SavedConstellation {
@@ -106,6 +106,10 @@ export interface Settings {
   quality: QualityMode;
   /** 30 fps battery mode. */
   battery: boolean;
+  /** Calmer camera, boat and swell. */
+  reduceMotion: boolean;
+  /** Real minutes for one full day loop. */
+  dayMinutes: number;
 }
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = {
@@ -114,6 +118,8 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   ambience: 0.7,
   quality: 'auto',
   battery: false,
+  reduceMotion: false,
+  dayMinutes: CYCLE.defaultMinutes,
 };
 
 const SETTINGS_KEY = 'celestial-sea.settings.v1';
@@ -123,8 +129,19 @@ function volume(raw: unknown, fallback: number): number {
   return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : fallback;
 }
 
+/** Defaults for this device: Reduce motion starts on if the system asks for it. */
+export function deviceDefaults(): Settings {
+  let reduce = false;
+  try {
+    reduce = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    /* no media queries: keep the default */
+  }
+  return { ...DEFAULT_SETTINGS, reduceMotion: reduce };
+}
+
 /** Fill in anything missing or invalid with defaults. */
-export function sanitiseSettings(raw: unknown): Settings {
+export function sanitiseSettings(raw: unknown, defaults: Settings = DEFAULT_SETTINGS): Settings {
   const r = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
   const quality = r.quality === 'high' || r.quality === 'low' || r.quality === 'auto' ? r.quality : DEFAULT_SETTINGS.quality;
   return {
@@ -133,16 +150,18 @@ export function sanitiseSettings(raw: unknown): Settings {
     ambience: volume(r.ambience, DEFAULT_SETTINGS.ambience),
     quality,
     battery: r.battery === true,
+    reduceMotion: typeof r.reduceMotion === 'boolean' ? r.reduceMotion : defaults.reduceMotion,
+    dayMinutes: CYCLE.options.includes(r.dayMinutes as number) ? (r.dayMinutes as number) : defaults.dayMinutes,
   };
 }
 
-export function loadSettings(store: SkyStore | null = defaultStore()): Settings {
-  if (!store) return { ...DEFAULT_SETTINGS };
+export function loadSettings(store: SkyStore | null = defaultStore(), defaults: Settings = DEFAULT_SETTINGS): Settings {
+  if (!store) return { ...defaults };
   try {
     const text = store.getItem(SETTINGS_KEY);
-    return sanitiseSettings(text ? JSON.parse(text) : null);
+    return sanitiseSettings(text ? JSON.parse(text) : null, defaults);
   } catch {
-    return { ...DEFAULT_SETTINGS };
+    return { ...defaults };
   }
 }
 

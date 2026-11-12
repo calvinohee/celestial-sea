@@ -14,12 +14,13 @@ import {
   type WebGLRenderer,
   type WebGLRenderTarget,
 } from 'three';
-import { RIDGES, WATER } from '../config';
+import { RIDGES, WATER, WATER_SIM } from '../config';
 import type { DayCycle } from '../time/dayCycle';
 import { createColorTarget, FSQ_VERT, FullScreenQuad } from '../util/fullscreen';
 import { SKY_GLSL, type SkyUniforms } from './sky';
 import { REFLECT_LAYER } from './stars';
-import { SWELL_GLSL } from './swell';
+import { SWELL_GLSL, swellScale } from './swell';
+import type { WaterSimUniforms } from './waterSim';
 
 const VERT = /* glsl */ `
 uniform float uTime;
@@ -56,6 +57,11 @@ uniform float uFogDistance;
 uniform float uRipple;
 uniform vec3 uLampPos;
 uniform vec3 uLampColor;
+uniform sampler2D tSim;
+uniform vec3 uSim;
+uniform vec2 uSimCell;
+uniform float uSimNormal;
+uniform float uBio;
 ${SKY_GLSL}
 
 void main() {
@@ -70,7 +76,21 @@ void main() {
   vec2 n2 = texture2D(tNoise, p * 0.067 + uTime * vec2(-0.0083, 0.0061)).rg - 0.5;
   vec2 n3 = texture2D(tNoise, p * 0.23 + uTime * vec2(0.011, -0.0147)).rg - 0.5;
   vec2 rip = (n1 * 1.1 + n2 * 0.8 + n3 * 0.5) * uRipple;
-  vec3 N = normalize(vec3(-vGrad.x - rip.x, 1.0, -vGrad.y - rip.y));
+
+  // Interactive waves (touches, the boat's wake) from the simulation around the boat.
+  vec2 simSlope = vec2(0.0);
+  vec2 suv = (p - uSim.xy) / uSim.z + 0.5;
+  if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0) {
+    float hl = texture2D(tSim, suv - vec2(uSimCell.x, 0.0)).r;
+    float hr = texture2D(tSim, suv + vec2(uSimCell.x, 0.0)).r;
+    float hd = texture2D(tSim, suv - vec2(0.0, uSimCell.x)).r;
+    float hu = texture2D(tSim, suv + vec2(0.0, uSimCell.x)).r;
+    simSlope = vec2(hr - hl, hu - hd) / (2.0 * uSimCell.y);
+  }
+  float agitation = length(simSlope);
+  vec2 tilt = simSlope * uSimNormal;
+
+  vec3 N = normalize(vec3(-vGrad.x - rip.x - tilt.x, 1.0, -vGrad.y - rip.y - tilt.y));
 
   vec3 R = reflect(-V, N);
   R.y = abs(R.y) + 0.004;
@@ -117,6 +137,13 @@ ${layers
   vec3 L = toLamp * inversesqrt(ld2);
   float lspec = pow(max(dot(reflect(-L, N), V), 0.0), 26.0);
   col += uLampColor * (latt * (0.34 + 2.4 * lspec));
+
+  // Disturbed water glows: bioluminescence by night, a pale glint by day.
+  // Only the steep faces of waves count as stirred, so a wake glows along its
+  // arms and ripples along their rings rather than as a filled patch.
+  float stirred = smoothstep(0.05, 0.3, agitation);
+  col += vec3(0.1, 0.74, 0.8) * (uBio * stirred * 0.2);
+  col += vec3(0.9, 0.95, 1.0) * ((1.0 - uBio) * stirred * 0.02);
 
   // Blurred planar reflection of light sources (lanterns, bright stars, glow).
   if (uReflect > 0.0) {
@@ -198,7 +225,7 @@ export class Water {
   private readonly clearColor = new Color();
   private readonly black = new Color(0, 0, 0);
 
-  constructor(skyUniforms: SkyUniforms, noise: Texture, ridgeProfile: Texture) {
+  constructor(skyUniforms: SkyUniforms, noise: Texture, ridgeProfile: Texture, sim: WaterSimUniforms) {
     this.rtScene = createColorTarget();
     this.rtBlurA = createColorTarget();
     this.rtBlurB = createColorTarget();
@@ -208,7 +235,11 @@ export class Water {
       fragmentShader: FRAG,
       uniforms: {
         ...skyUniforms,
+        ...sim,
+        uSimNormal: { value: WATER_SIM.normalStrength },
+        uBio: { value: 0 },
         uTime: { value: 0 },
+        uSwellScale: swellScale,
         tNoise: { value: noise },
         tRidge: { value: ridgeProfile },
         tReflect: { value: this.rtBlurB.texture },
@@ -260,6 +291,7 @@ export class Water {
     this.mesh.position.set(camera.position.x, 0, camera.position.z);
     this.material.uniforms.uTime.value = elapsed;
     this.material.uniforms.uWaterDeep.value.copy(cycle.waterDeep);
+    this.material.uniforms.uBio.value = cycle.glow;
     this.material.uniforms.uReflect.value = this.reflections ? 1 : 0;
   }
 

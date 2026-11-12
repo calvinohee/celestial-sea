@@ -121,15 +121,22 @@ describe('settings', () => {
 
   it('round-trips and repairs bad values', () => {
     const s = store();
-    expect(saveSettings({ music: 0.25, effects: 0, ambience: 1, quality: 'low', battery: true }, s)).toBe(true);
-    expect(loadSettings(s)).toEqual({ music: 0.25, effects: 0, ambience: 1, quality: 'low', battery: true });
-    expect(sanitiseSettings({ music: 7, effects: 'loud', ambience: -2, quality: 'ultra', battery: 'yes' })).toEqual({
+    const mine = { music: 0.25, effects: 0, ambience: 1, quality: 'low' as const, battery: true, reduceMotion: true, dayMinutes: 5 };
+    expect(saveSettings(mine, s)).toBe(true);
+    expect(loadSettings(s)).toEqual(mine);
+    expect(
+      sanitiseSettings({ music: 7, effects: 'loud', ambience: -2, quality: 'ultra', battery: 'yes', reduceMotion: 1, dayMinutes: 3 }),
+    ).toEqual({
       music: 1,
       effects: DEFAULT_SETTINGS.effects,
       ambience: 0,
       quality: 'auto',
       battery: false,
+      reduceMotion: false,
+      dayMinutes: DEFAULT_SETTINGS.dayMinutes,
     });
+    // Settings saved before these options existed pick up this device's defaults.
+    expect(sanitiseSettings({ music: 0.5 }, { ...DEFAULT_SETTINGS, reduceMotion: true }).reduceMotion).toBe(true);
     s.data.set('celestial-sea.settings.v1', 'not json');
     expect(loadSettings(s)).toEqual(DEFAULT_SETTINGS);
   });

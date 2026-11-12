@@ -1,5 +1,5 @@
 import { Color, Vector3 } from 'three';
-import { LOOP_SECONDS, PHASES, SKY, type PhaseConfig, type PhaseName } from '../config';
+import { CYCLE, LOOP_SECONDS, PHASES, SKY, type PhaseConfig, type PhaseName } from '../config';
 
 /** Colours of one phase, converted once to linear working space. */
 interface PhaseColors {
@@ -65,14 +65,16 @@ function lerp(a: number, b: number, t: number): number {
 }
 
 /**
- * The fixed 20-minute day loop. Owns the clock and the blended palette; every
+ * The fixed day loop. Owns the clock and the blended palette; every
  * renderer module reads colours from here so sky, water and fog always agree.
  */
 export class DayCycle {
-  /** Seconds into the loop. Every session starts at 0 = golden hour. */
+  /** Seconds into the reference timeline (0..LOOP_SECONDS). Every session starts at 0 = golden hour. */
   time = 0;
   /** Clock multiplier (debug fast-forward). */
   timeScale = 1;
+  /** How fast real time moves through the reference timeline. */
+  private rate = LOOP_SECONDS / (CYCLE.defaultMinutes * 60);
 
   readonly blend: PhaseBlend = { index: 0, next: 1, mix: 0, progress: 0 };
 
@@ -114,6 +116,15 @@ export class DayCycle {
     return PHASES[this.blend.index].name;
   }
 
+  /** Real minutes one full loop takes. */
+  get loopMinutes(): number {
+    return LOOP_SECONDS / this.rate / 60;
+  }
+
+  set loopMinutes(minutes: number) {
+    this.rate = LOOP_SECONDS / (Math.max(1, minutes) * 60);
+  }
+
   /** Jump the clock (debug / tests). */
   setTime(seconds: number): void {
     this.time = ((seconds % LOOP_SECONDS) + LOOP_SECONDS) % LOOP_SECONDS;
@@ -121,7 +132,7 @@ export class DayCycle {
   }
 
   update(dt: number): void {
-    this.time = (this.time + dt * this.timeScale) % LOOP_SECONDS;
+    this.time = (this.time + dt * this.timeScale * this.rate) % LOOP_SECONDS;
     const b = phaseBlendAt(this.time, this.blend);
     const pa = PHASES[b.index];
     const pb = PHASES[b.next];

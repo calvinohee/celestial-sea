@@ -12,7 +12,7 @@ import {
 } from 'three';
 import { RIPPLES, WAKE } from '../config';
 import type { DayCycle } from '../time/dayCycle';
-import { SWELL_GLSL } from './swell';
+import { SWELL_GLSL, swellScale } from './swell';
 
 const RIPPLE_VERT = /* glsl */ `
 attribute vec3 aCenter;  // x, z, start time
@@ -98,7 +98,7 @@ export class Ripples {
     this.material = new ShaderMaterial({
       vertexShader: RIPPLE_VERT,
       fragmentShader: RIPPLE_FRAG,
-      uniforms: { uTime: { value: 0 }, uIntensity: { value: 1 } },
+      uniforms: { uTime: { value: 0 }, uIntensity: { value: 1 }, uSwellScale: swellScale },
       blending: AdditiveBlending,
       depthWrite: false,
       transparent: true,
@@ -176,8 +176,8 @@ void main() {
   fade *= smoothstep(0.0, 0.015, vAge) * (1.0 - smoothstep(0.85, 1.0, s));
   float a = (edges + centre) * fade * vStrength * mix(0.25, 1.0, breakup);
   // Pale foam by day, cyan-teal bioluminescence as the light goes.
-  vec3 col = mix(vec3(0.85, 0.92, 1.0) * 0.075, vec3(0.12, 0.74, 0.8) * 0.3, uGlow);
-  col += vec3(0.3, 1.0, 0.9) * (uGlow * 0.42 * breakup * breakup * (1.0 - vAge));
+  vec3 col = mix(vec3(0.85, 0.92, 1.0) * 0.05, vec3(0.12, 0.74, 0.8) * 0.14, uGlow);
+  col += vec3(0.3, 1.0, 0.9) * (uGlow * 0.22 * breakup * breakup * (1.0 - vAge));
   gl_FragColor = vec4(col * a, 1.0);
 }
 `;
@@ -225,7 +225,7 @@ export class Wake {
     this.material = new ShaderMaterial({
       vertexShader: WAKE_VERT,
       fragmentShader: WAKE_FRAG,
-      uniforms: { uTime: { value: 0 }, uGlow: { value: 0 }, tNoise: { value: noise } },
+      uniforms: { uTime: { value: 0 }, uGlow: { value: 0 }, tNoise: { value: noise }, uSwellScale: swellScale },
       blending: AdditiveBlending,
       depthWrite: false,
       transparent: true,
