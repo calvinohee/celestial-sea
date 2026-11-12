@@ -10,7 +10,7 @@ Running record so a later session can pick up without re-reading everything. See
 | 2. Boat and controls | Done |
 | 3. Audio engine | Done |
 | 4. Lanterns and constellations | Done |
-| 5. Polish and ship | Done (not yet deployed; needs device testing) |
+| 5. Polish and ship | Done and deployed (needs device testing) |
 
 ## How to run
 
@@ -24,9 +24,14 @@ npm run icons      # redraw public/icons/*.png (procedural, no dependencies)
 
 ## Deploying
 
-`.github/workflows/deploy.yml` builds, tests and publishes `dist/` to GitHub Pages on every push to `main`. It has never run: this folder has no git remote yet. To go live: create a GitHub repository, push `main`, and in the repository's Settings -> Pages set Source to "GitHub Actions". The build uses a relative base, so it works at `https://<user>.github.io/<repo>/` with no further configuration.
+- **Live:** https://calvinohee.github.io/celestial-sea/
+- **Repository:** https://github.com/calvinohee/celestial-sea (public)
 
-Debug: `T` toggles a x20 fast-forward of the day cycle. In dev builds `window.__cs` exposes the cycle, pipeline, boat, etc. (`__cs.cycle.setTime(seconds)`, `__cs.setQuality('low')`, `__cs.step(seconds)` to advance the simulation in fixed steps without waiting on real time).
+`.github/workflows/deploy.yml` tests, builds and publishes `dist/` to GitHub Pages on every push to `main` (Pages source is set to "GitHub Actions"). First deployed 2026-11-12; checked live in Chrome: loads, starts, releases a lantern, service worker active with all 32 samples cached, console clean.
+
+Commits use the GitHub no-reply address (set in this repository's git config); the first six local commits were rewritten to it before the first push, so earlier hashes quoted anywhere no longer exist.
+
+The workflow run warns that `actions/checkout@v4`, `setup-node@v4`, `configure-pages@v5`, `upload-pages-artifact@v3` and `deploy-pages@v4` target the deprecated Node 20 runtime. It still passes; bump them when newer majors are confirmed.
 
 ## Milestone 1: Scene (done)
 
